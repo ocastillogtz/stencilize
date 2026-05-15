@@ -1,5 +1,8 @@
 from flask import Flask, render_template, request, send_file, redirect, url_for
 import os
+import io
+import zipfile
+import shutil
 from werkzeug.utils import secure_filename
 from functions.posterize_funcs import posterize_main
 
@@ -40,12 +43,30 @@ def index():
             layers = int(request.form.get("layers"))
 
             # Call posterize workflow
-            posterize_main(filepath, layers,tiling,paper_size,blurring)
+            output_folder = "posterized_variations"
+            if os.path.exists(output_folder):
+                shutil.rmtree(output_folder)
 
-            # For simplicity, let's assume the main PDF is saved in output folder
-            pdf_path = os.path.join(app.config['OUTPUT_FOLDER'], f"{filename}_poster.pdf")
+            posterize_main(filepath, layers, tiling, paper_size, blurring)
 
-            return f"File processed! PDF generated at: {pdf_path}"
+            # Zip up all generated PDFs and send as download
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(output_folder):
+                    for f in files:
+                        if f.endswith(".pdf"):
+                            full_path = os.path.join(root, f)
+                            arcname = os.path.relpath(full_path, output_folder)
+                            zf.write(full_path, arcname)
+            zip_buffer.seek(0)
+
+            base_name = os.path.splitext(filename)[0]
+            return send_file(
+                zip_buffer,
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=f"{base_name}_stencils.zip"
+            )
 
     return render_template("home_page.html")
 
